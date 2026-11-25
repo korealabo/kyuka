@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>休暇届 | 株式会社ケイラボ</title>
+<script src="https://cdn.jsdelivr.net/npm/emailjs-com@3/dist/email.min.js"></script>
 <style>
 :root{
   --bg:#f5f4f2; --card:#ffffff; --ink:#1a1a1a; --sub:#8a8680;
@@ -106,6 +107,19 @@ const fmtD = s => {
 };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 const APPROVERS = ["yumi@korea-labo.com", "info@korea-labo.com"];
+const EMAILJS_SID = "service_64db3nr", EMAILJS_TID = "template_pxbiqdi", EMAILJS_KEY = "Fq3I6k806Lj82-huC";
+async function sendMail(toEmails, subject, body) {
+  if (typeof emailjs === "undefined" || !toEmails.length) return false;
+  try {
+    emailjs.init(EMAILJS_KEY);
+    await emailjs.send(EMAILJS_SID, EMAILJS_TID, {
+      subject: subject, message: body,
+      cc_emails: toEmails.join(","), name: "休暇届システム", email: toEmails.join(","),
+      time: new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })
+    });
+    return true;
+  } catch (e) { console.error("EmailJS error:", e); return false; }
+}
 const stLabel = s => s === "approved" ? "✅ 承認済み" : s === "rejected" ? "差戻し" : "承認待ち";
 const stClass = s => s === "approved" ? "st-approved" : s === "rejected" ? "st-rejected" : "st-pending";
 const calcDays = (from, to) => {
@@ -219,7 +233,7 @@ function renderDetail() {
 
     '<div class="section-title">１．基本情報</div>' +
     row("届出日", r.draftDate) +
-    row("休暇者", r.name) +
+    row("休暇者", r.name + (r.applicantEmail ? "（" + r.applicantEmail + "）" : "")) +
     row("休暇希望日", fmtD(r.fromDate) + " 〜 " + fmtD(r.toDate) + "（" + r.useDays + "日間）") +
 
     '<div class="section-title">２．休暇日数</div>' +
@@ -269,6 +283,16 @@ function renderDetail() {
         t.approvedAt = new Date().toISOString();
         t.approveComment = comment.trim();
       });
+      const t2 = requests.find(x => x.id === currentId);
+      if (t2 && t2.applicantEmail) {
+        const label = status === "approved" ? "承認されました" : "差戻しされました";
+        await sendMail([t2.applicantEmail],
+          "【休暇届】" + label + "（" + fmtD(t2.fromDate) + "〜" + fmtD(t2.toDate) + "）",
+          t2.name + " さん\n\nあなたの休暇届（" + fmtD(t2.fromDate) + " 〜 " + fmtD(t2.toDate) + "・" + t2.useDays + "日間）が" + label + "。\n" +
+          "処理者：" + (t2.approvedBy || "") + "\n" +
+          (comment.trim() ? "コメント：" + comment.trim() + "\n" : "") +
+          "\n詳細はこちら：https://korealabo.github.io/kyuka/");
+      }
       render();
     } catch (e) { alert(e.message); }
   };
@@ -296,6 +320,8 @@ function renderForm() {
     '<input type="text" id="fDraft" value="' + todayJP() + '" readonly>' +
     '<label>休暇者（お名前）<span class="req">必須</span></label>' +
     '<input type="text" id="fName" placeholder="あなたの名前">' +
+    '<label>休暇者メール</label>' +
+    '<input type="text" id="fEmail" placeholder="承認・差戻しの結果通知を受け取るメールアドレス（任意）">' +
     '<label>休暇希望日<span class="req">必須</span></label>' +
     '<div class="daterow"><input type="date" id="fFrom">〜<input type="date" id="fTo"></div>' +
     '<div class="calcbox" id="calcPeriod">日付を選ぶと休暇日数が自動計算されます</div>' +
@@ -375,7 +401,8 @@ function renderForm() {
   $("fUse").oninput = () => updateCalc(false);
 
   $("btnSubmit").onclick = async () => {
-    const name = $("fName").value.trim(), from = $("fFrom").value, to = $("fTo").value,
+    const name = $("fName").value.trim(), email = $("fEmail").value.trim(),
+          from = $("fFrom").value, to = $("fTo").value,
           have = parseFloat($("fHave").value), use = parseFloat($("fUse").value),
           reason = $("fReason").value.trim(), deputy = $("fDeputy").value.trim(),
           phone = $("fPhone").value.trim(),
@@ -401,7 +428,7 @@ function renderForm() {
     try {
       await mutate(() => {
         requests.push({
-          id: uid(), draftDate: todayJP(), name, fromDate: from, toDate: to,
+          id: uid(), draftDate: todayJP(), name, applicantEmail: email, fromDate: from, toDate: to,
           haveDays: have, useDays: use, afterDays: Math.round((have - use) * 10) / 10,
           status: "pending",
           vacationType: vtype, daikyuDetail: vtype === "代休" ? daikyu : "",
@@ -413,7 +440,16 @@ function renderForm() {
           submittedAt: new Date().toISOString()
         });
       });
-      alert("✅ 休暇届を提出しました。");
+      const body = "休暇届が提出されました。\n\n" +
+        "■ 休暇者：" + name + "\n" +
+        "■ 休暇期間：" + fmtD(from) + " 〜 " + fmtD(to) + "（" + use + "日間）\n" +
+        "■ 休暇の種類：" + vtype + (vtype === "代休" ? "（" + daikyu + "）" : "") + "\n" +
+        "■ 事由：" + reason + "\n" +
+        "■ 業務代行者：" + deputy + "\n" +
+        "■ 会社携帯の電話対応：" + phone + "\n\n" +
+        "▼ 承認はこちらから\nhttps://korealabo.github.io/kyuka/";
+      const sent = await sendMail(APPROVERS, "【休暇届】" + name + "さんより新規提出（" + fmtD(from) + "〜）", body);
+      alert(sent ? "✅ 休暇届を提出しました。決裁者へ通知メールを送信しました。" : "✅ 休暇届を提出しました。（通知メールの送信に失敗しましたが、届出は保存されています）");
       view = "list"; render();
     } catch (e) {
       $("fMsg").innerHTML = '<p class="msg err">' + esc(e.message) + '</p>';
