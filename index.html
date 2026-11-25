@@ -320,8 +320,8 @@ function renderForm() {
     '<input type="text" id="fDraft" value="' + todayJP() + '" readonly>' +
     '<label>休暇者（お名前）<span class="req">必須</span></label>' +
     '<input type="text" id="fName" placeholder="あなたの名前">' +
-    '<label>休暇者メール</label>' +
-    '<input type="text" id="fEmail" placeholder="承認・差戻しの結果通知を受け取るメールアドレス（任意）">' +
+    '<label>休暇者メール<span class="req">必須</span></label>' +
+    '<input type="text" id="fEmail" placeholder="承認・差戻しの結果通知が届くメールアドレス">' +
     '<label>休暇希望日<span class="req">必須</span></label>' +
     '<div class="daterow"><input type="date" id="fFrom">〜<input type="date" id="fTo"></div>' +
     '<div class="calcbox" id="calcPeriod">日付を選ぶと休暇日数が自動計算されます</div>' +
@@ -412,6 +412,8 @@ function renderForm() {
     const days = calcDays(from, to);
     const errs = [];
     if (!name) errs.push("休暇者（お名前）");
+    if (!email) errs.push("休暇者メール");
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errs.push("休暇者メール（正しい形式で入力してください）");
     if (!from || !to || days === null) errs.push("休暇希望日（正しい期間）");
     if (isNaN(have)) errs.push("現在の保有休暇日数");
     if (isNaN(use)) errs.push("使用日数");
