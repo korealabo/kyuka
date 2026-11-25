@@ -51,6 +51,14 @@ details.howto .mailex{background:#fff;border:1px dashed var(--line);border-radiu
 .relrow{display:flex;gap:8px;margin-bottom:8px}
 .relrow input{flex:1}
 button.mini{font-size:12px;padding:6px 12px}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px}
+.modal{background:#fff;border-radius:14px;padding:22px 20px;max-width:460px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.18)}
+.modal h2{font-size:16px;margin-bottom:2px}
+.modal .note{font-size:11.5px;color:var(--sub);margin-top:8px}
+.modal .mbtns{display:flex;gap:10px;margin-top:16px}
+.modal .mbtns button{flex:1;padding:11px}
+button.okgreen{color:var(--ok);border-color:#cfe5d8;background:#f3faf6;font-weight:700}
+button.okred{color:var(--red);border-color:#eddede;background:#fdf7f7;font-weight:700}
 .post-title{font-size:15.5px;font-weight:700;margin-bottom:2px}
 .post-sub{font-size:12.5px;color:var(--sub)}
 .empty{text-align:center;color:var(--sub);font-size:13.5px;padding:48px 0}
@@ -278,36 +286,72 @@ function renderDetail() {
     '<div style="margin-top:26px;text-align:right"><button class="danger" id="btnDelPost">🗑 この届出を削除（管理者）</button></div>' +
     '</div>';
   $("btnBack").onclick = () => { view = "list"; refresh(); };
-  const decide = async (status) => {
-    const pw = prompt("管理者パスワードを入力してください");
-    if (pw === null) return;
-    if (pw !== ADMIN_PASSWORD) { alert("パスワードが違います"); return; }
-    const comment = prompt(status === "approved" ? "承認コメント（任意・空欄可）" : "差戻しの理由を入力してください") || "";
-    if (status === "rejected" && !comment.trim()) { alert("差戻しの理由を入力してください"); return; }
-    try {
-      await mutate(() => {
-        const t = requests.find(x => x.id === currentId);
-        if (!t) throw new Error("届出が見つかりません");
-        t.status = status;
-        t.approvedBy = $("apvEmail") ? $("apvEmail").value : APPROVERS[0];
-        t.approvedAt = new Date().toISOString();
-        t.approveComment = comment.trim();
-      });
-      const t2 = requests.find(x => x.id === currentId);
-      if (t2 && t2.applicantEmail) {
-        const label = status === "approved" ? "承認されました" : "差戻しされました";
-        await sendMail([t2.applicantEmail],
-          "【休暇届】" + label + "（" + fmtD(t2.fromDate) + "〜" + fmtD(t2.toDate) + "）",
-          t2.name + " さん\n\nあなたの休暇届（" + fmtD(t2.fromDate) + " 〜 " + fmtD(t2.toDate) + "・" + t2.useDays + "日間）が" + label + "。\n" +
-          "処理者：" + (t2.approvedBy || "") + "\n" +
-          (comment.trim() ? "コメント：" + comment.trim() + "\n" : "") +
-          "\n詳細はこちら：https://korealabo.github.io/kyuka/");
+  const openDecision = (status) => {
+    const isAp = status === "approved";
+    const ov = document.createElement("div");
+    ov.className = "overlay";
+    ov.innerHTML =
+      '<div class="modal">' +
+      '<h2>' + (isAp ? "✅ 承認する" : "↩ 差戻しする") + '</h2>' +
+      '<p style="font-size:12.5px;color:var(--sub)">決裁者パスワードを入力してください</p>' +
+      '<input type="password" id="mPw" placeholder="パスワード" style="margin-top:6px" autocomplete="off">' +
+      '<label style="margin-top:14px">' + (isAp ? 'コメント <span style="color:var(--sub);font-weight:400;font-size:11.5px">（任意）</span>' : '差戻し理由 <span class="req">必須</span>') + '</label>' +
+      '<textarea id="mComment" placeholder="' + (isAp ? '申請者へのコメントがあれば入力（メールで通知されます）' : '差戻しの理由を入力してください（申請者にメールで通知されます）') + '" style="min-height:85px"></textarea>' +
+      '<div class="note">※ 入力した内容は申請者・関係者へのメールに含まれます</div>' +
+      '<div id="mMsg"></div>' +
+      '<div class="mbtns"><button id="mCancel">キャンセル</button><button id="mOk" class="' + (isAp ? "okgreen" : "okred") + '">確認</button></div>' +
+      '</div>';
+    document.body.appendChild(ov);
+    const close = () => { if (ov.parentNode) document.body.removeChild(ov); };
+    ov.querySelector("#mCancel").onclick = close;
+    ov.addEventListener("click", e => { if (e.target === ov) close(); });
+    const approverEmail = $("apvEmail") ? $("apvEmail").value : APPROVERS[0];
+    ov.querySelector("#mOk").onclick = async () => {
+      const pw = ov.querySelector("#mPw").value;
+      const comment = ov.querySelector("#mComment").value.trim();
+      const msgEl = ov.querySelector("#mMsg");
+      if (pw !== ADMIN_PASSWORD) { msgEl.innerHTML = '<p class="msg err">パスワードが違います</p>'; return; }
+      if (!isAp && !comment) { msgEl.innerHTML = '<p class="msg err">差戻し理由を入力してください</p>'; return; }
+      const okBtn = ov.querySelector("#mOk");
+      okBtn.disabled = true; okBtn.textContent = "処理中...";
+      try {
+        await mutate(() => {
+          const t = requests.find(x => x.id === currentId);
+          if (!t) throw new Error("届出が見つかりません");
+          t.status = status;
+          t.approvedBy = approverEmail;
+          t.approvedAt = new Date().toISOString();
+          t.approveComment = comment;
+        });
+        const t2 = requests.find(x => x.id === currentId);
+        if (t2) {
+          const to = [t2.applicantEmail].concat((t2.relations || []).map(x => x.email)).filter(Boolean);
+          const label = isAp ? "承認されました" : "差戻しされました";
+          if (to.length) {
+            await sendMail(to,
+              "【休暇届】" + label + "（" + t2.name + "・" + fmtD(t2.fromDate) + "〜）",
+              t2.name + " さんの休暇届が" + label + "。\n\n" +
+              "■ 休暇期間：" + fmtD(t2.fromDate) + " 〜 " + fmtD(t2.toDate) + "（" + t2.useDays + "日間）\n" +
+              "■ 休暇の種類：" + (t2.vacationType || "") + (t2.daikyuDetail ? "（" + t2.daikyuDetail + "）" : "") + "\n" +
+              "■ 事由：" + (t2.reason || "") + "\n" +
+              "■ 休暇前の保有日数：" + t2.haveDays + "日\n" +
+              "■ 使用後の残り休暇日数：" + t2.afterDays + "日\n" +
+              "■ 業務代行者：" + (t2.deputy || "") + "\n\n" +
+              "処理者：" + approverEmail + "\n" +
+              (comment ? "コメント：" + comment + "\n" : "") +
+              "\n詳細はこちら：https://korealabo.github.io/kyuka/");
+          }
+        }
+        close();
+        render();
+      } catch (e) {
+        msgEl.innerHTML = '<p class="msg err">' + esc(e.message) + '</p>';
+        okBtn.disabled = false; okBtn.textContent = "確認";
       }
-      render();
-    } catch (e) { alert(e.message); }
+    };
   };
-  if ($("btnApprove")) $("btnApprove").onclick = () => decide("approved");
-  if ($("btnReject")) $("btnReject").onclick = () => decide("rejected");
+  if ($("btnApprove")) $("btnApprove").onclick = () => openDecision("approved");
+  if ($("btnReject")) $("btnReject").onclick = () => openDecision("rejected");
   $("btnDelPost").onclick = async () => {
     const pw = prompt("管理者パスワードを入力してください");
     if (pw === null) return;
@@ -382,8 +426,8 @@ function renderForm() {
     '<input type="text" id="fPhone" placeholder="会社携帯にかかってきた電話に対応する人の名前（氏名を入力）" autocomplete="off">' +
 
     '<div class="section-title">５．関係者への通知</div>' +
-    '<label>関係者（氏名・メールアドレス）</label>' +
-    '<div style="font-size:12px;color:var(--sub);margin-bottom:6px">メールアドレスを入力すると、この休暇届の提出通知が関係者にも届きます。</div>' +
+    '<label>関係者（氏名・メールアドレス）<span class="req">必須（1名以上）</span></label>' +
+    '<div style="font-size:12px;color:var(--sub);margin-bottom:6px">少なくとも1名の氏名とメールアドレスを入力してください。関係者には提出・承認結果の通知が届きます。</div>' +
     '<div id="relRows"></div>' +
     '<button class="mini" id="btnAddRel">＋ 関係者を追加</button>' +
 
@@ -413,7 +457,7 @@ function renderForm() {
   const addRel = () => {
     const d = document.createElement("div");
     d.className = "relrow";
-    d.innerHTML = '<input type="text" class="relName" placeholder="関係者の氏名" autocomplete="off"><input type="text" class="relMail" placeholder="メールアドレス（任意・入力で通知あり）" autocomplete="off">';
+    d.innerHTML = '<input type="text" class="relName" placeholder="関係者の氏名" autocomplete="off"><input type="text" class="relMail" placeholder="メールアドレス（1名以上必須・入力で通知あり）" autocomplete="off">';
     $("relRows").appendChild(d);
   };
   addRel(); addRel();
@@ -452,6 +496,7 @@ function renderForm() {
     if (!prep) errs.push("特別業務への備え（YES / NO）");
     if (!deputy) errs.push("業務代行者");
     if (!phone) errs.push("電話対応者");
+    if (!relations.some(x => x.name && x.email)) errs.push("関係者（氏名とメールアドレスを1名以上入力してください）");
     if (relations.some(x => x.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x.email))) errs.push("関係者のメールアドレス（正しい形式で入力してください）");
     if (errs.length) { $("fMsg").innerHTML = '<p class="msg err">次の必須項目を入力してください：' + esc(errs.join("、")) + '</p>'; return; }
     if (have - use < 0 && !confirm("使用後の保有休暇日数がマイナスになります。このまま提出しますか？")) return;
