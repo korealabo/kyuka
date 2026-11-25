@@ -48,6 +48,9 @@ details.howto .mailex{background:#fff;border:1px dashed var(--line);border-radiu
 .ynbox .opts{display:flex;gap:18px}
 .ynbox label.opt{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:600;margin:0;cursor:pointer}
 .ynbox input{width:17px;height:17px;accent-color:var(--accent)}
+.relrow{display:flex;gap:8px;margin-bottom:8px}
+.relrow input{flex:1}
+button.mini{font-size:12px;padding:6px 12px}
 .post-title{font-size:15.5px;font-weight:700;margin-bottom:2px}
 .post-sub{font-size:12.5px;color:var(--sub)}
 .empty{text-align:center;color:var(--sub);font-size:13.5px;padding:48px 0}
@@ -261,6 +264,7 @@ function renderDetail() {
     row("特別業務への備え（バイヤー対応・イベント準備・新規事業など）", r.specialPrep === "YES" ? "✅ YES（備えました／該当業務なし）" : r.specialPrep === "NO" ? "⚠️ NO" : "") +
     row("休暇期間中の業務代行者", r.deputy) +
     row("会社携帯の電話対応者", r.phonePerson) +
+    row("関係者", (r.relations || []).map(x => x.name + (x.email ? "（" + x.email + "）" : "")).join("、")) +
 
     '<div class="section-title">５．承認</div>' +
     '<div class="detail-row"><span class="detail-label">承認状況</span><span class="detail-val"><span class="badge ' + stClass(r.status) + '">' + stLabel(r.status) + '</span></span></div>' +
@@ -325,9 +329,9 @@ function renderForm() {
     '<label>届出日</label>' +
     '<input type="text" id="fDraft" value="' + todayJP() + '" readonly>' +
     '<label>休暇者（お名前）<span class="req">必須</span></label>' +
-    '<input type="text" id="fName" placeholder="あなたの名前">' +
+    '<input type="text" id="fName" placeholder="あなたの名前" autocomplete="off">' +
     '<label>休暇者メール<span class="req">必須</span></label>' +
-    '<input type="text" id="fEmail" placeholder="承認・差戻しの結果通知が届くメールアドレス">' +
+    '<input type="text" id="fEmail" placeholder="承認・差戻しの結果通知が届くメールアドレス" autocomplete="off">' +
     '<label>休暇希望日<span class="req">必須</span></label>' +
     '<div class="daterow"><input type="date" id="fFrom">〜<input type="date" id="fTo"></div>' +
     '<div class="calcbox" id="calcPeriod">日付を選ぶと休暇日数が自動計算されます</div>' +
@@ -351,7 +355,7 @@ function renderForm() {
     '<textarea id="fReason" placeholder="例：私用のため、帰省のため など"></textarea>' +
 
     '<div class="section-title">４．業務対応</div>' +
-    '<label>既存業務の対応</label>' +
+    '<label>業務対応チェック<span class="req">すべて必須</span></label>' +
     '<label class="checkrow"><input type="checkbox" id="fWorkOk"><span>既存業務の対応に問題はありません（事前処理・引き継ぎ済み）</span></label>' +
     '<label class="checkrow"><input type="checkbox" id="fWorkCal"><span>Googleカレンダーに休暇期間を記載します</span></label>' +
     '<label class="checkrow"><input type="checkbox" id="fWorkKakao"><span>休暇前日の退勤までに、会社の業務連絡カカオトークルームで休暇を共有します</span></label>' +
@@ -373,9 +377,15 @@ function renderForm() {
     '<label class="opt"><input type="radio" name="fPrep" value="NO"> NO</label>' +
     '</div></div>' +
     '<label>休暇期間中の業務代行者<span class="req">必須</span></label>' +
-    '<input type="text" id="fDeputy" placeholder="代行をお願いするメンバーの名前">' +
+    '<input type="text" id="fDeputy" placeholder="代行をお願いするメンバーの名前" autocomplete="off">' +
     '<label>会社携帯の電話対応者<span class="req">必須</span></label>' +
-    '<input type="text" id="fPhone" placeholder="会社携帯にかかってきた電話に対応する人の名前">' +
+    '<input type="text" id="fPhone" placeholder="会社携帯にかかってきた電話に対応する人の名前（氏名を入力）" autocomplete="off">' +
+
+    '<div class="section-title">５．関係者への通知</div>' +
+    '<label>関係者（氏名・メールアドレス）</label>' +
+    '<div style="font-size:12px;color:var(--sub);margin-bottom:6px">メールアドレスを入力すると、この休暇届の提出通知が関係者にも届きます。</div>' +
+    '<div id="relRows"></div>' +
+    '<button class="mini" id="btnAddRel">＋ 関係者を追加</button>' +
 
     '<div style="text-align:right;margin-top:18px"><button class="primary" id="btnSubmit">休暇届を提出する</button></div>' +
     '<div id="fMsg"></div></div>';
@@ -400,6 +410,14 @@ function renderForm() {
       $("fAfter").value = "";
     }
   };
+  const addRel = () => {
+    const d = document.createElement("div");
+    d.className = "relrow";
+    d.innerHTML = '<input type="text" class="relName" placeholder="関係者の氏名" autocomplete="off"><input type="text" class="relMail" placeholder="メールアドレス（任意・入力で通知あり）" autocomplete="off">';
+    $("relRows").appendChild(d);
+  };
+  addRel(); addRel();
+  $("btnAddRel").onclick = addRel;
   $("fType").onchange = () => { $("daikyuBox").style.display = $("fType").value === "代休" ? "block" : "none"; };
   $("fFrom").onchange = () => updateCalc(true);
   $("fTo").onchange = () => updateCalc(true);
@@ -414,7 +432,11 @@ function renderForm() {
           phone = $("fPhone").value.trim(),
           vtype = $("fType").value, daikyu = $("fDaikyu") ? $("fDaikyu").value.trim() : "",
           prepEl = document.querySelector('input[name="fPrep"]:checked'),
-          prep = prepEl ? prepEl.value : "";
+          prep = prepEl ? prepEl.value : "",
+          relations = Array.from(document.querySelectorAll("#relRows .relrow")).map(d => ({
+            name: d.querySelector(".relName").value.trim(),
+            email: d.querySelector(".relMail").value.trim()
+          })).filter(x => x.name || x.email);
     const days = calcDays(from, to);
     const errs = [];
     if (!name) errs.push("休暇者（お名前）");
@@ -426,9 +448,11 @@ function renderForm() {
     if (!vtype) errs.push("休暇の種類");
     if (vtype === "代休" && !daikyu) errs.push("代休の対象");
     if (!reason) errs.push("事由");
+    if (!$("fWorkOk").checked || !$("fWorkCal").checked || !$("fWorkKakao").checked || !$("fWorkCust").checked || !$("fWorkMail").checked) errs.push("業務対応のチェック項目（5つすべてにチェックが必要です）");
     if (!prep) errs.push("特別業務への備え（YES / NO）");
     if (!deputy) errs.push("業務代行者");
     if (!phone) errs.push("電話対応者");
+    if (relations.some(x => x.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x.email))) errs.push("関係者のメールアドレス（正しい形式で入力してください）");
     if (errs.length) { $("fMsg").innerHTML = '<p class="msg err">次の必須項目を入力してください：' + esc(errs.join("、")) + '</p>'; return; }
     if (have - use < 0 && !confirm("使用後の保有休暇日数がマイナスになります。このまま提出しますか？")) return;
     if (prep === "NO" && !confirm("特別業務への備えが「NO」のままです。承認時に確認が入る可能性があります。このまま提出しますか？")) return;
@@ -444,7 +468,7 @@ function renderForm() {
           calOk: $("fWorkCal").checked, kakaoOk: $("fWorkKakao").checked, custOk: $("fWorkCust").checked,
           mailOk: $("fWorkMail").checked,
           specialPrep: prep,
-          deputy, phonePerson: phone,
+          deputy, phonePerson: phone, relations,
           submittedAt: new Date().toISOString()
         });
       });
@@ -455,8 +479,10 @@ function renderForm() {
         "■ 事由：" + reason + "\n" +
         "■ 業務代行者：" + deputy + "\n" +
         "■ 会社携帯の電話対応：" + phone + "\n\n" +
-        "▼ 承認はこちらから\nhttps://korealabo.github.io/kyuka/";
-      const sent = await sendMail(APPROVERS, "【休暇届】" + name + "さんより新規提出（" + fmtD(from) + "〜）", body);
+        (relations.length ? "■ 関係者：" + relations.map(x => x.name).filter(Boolean).join("、") + "\n" : "") +
+        "\n▼ 承認はこちらから\nhttps://korealabo.github.io/kyuka/";
+      const recipients = APPROVERS.concat(relations.map(x => x.email).filter(Boolean));
+      const sent = await sendMail(recipients, "【休暇届】" + name + "さんより新規提出（" + fmtD(from) + "〜）", body);
       alert(sent ? "✅ 休暇届を提出しました。決裁者へ通知メールを送信しました。" : "✅ 休暇届を提出しました。（通知メールの送信に失敗しましたが、届出は保存されています）");
       view = "list"; render();
     } catch (e) {
@@ -468,13 +494,14 @@ function renderForm() {
 
 /* ===== CSV出力 ===== */
 function exportCsv() {
-  const headers = ["届出日","休暇者","休暇者メール","開始日","終了日","使用日数","保有日数（申請時）","使用後残日数","休暇の種類","代休の対象","事由","既存業務問題なし","カレンダー記載","業務連絡ルーム共有","お客様へ事前共有","メール自動返信設定","特別業務への備え","業務代行者","電話対応者","承認状況","処理者","処理日時","承認コメント","提出日時"];
+  const headers = ["届出日","休暇者","休暇者メール","開始日","終了日","使用日数","保有日数（申請時）","使用後残日数","休暇の種類","代休の対象","事由","既存業務問題なし","カレンダー記載","業務連絡ルーム共有","お客様へ事前共有","メール自動返信設定","特別業務への備え","業務代行者","電話対応者","関係者","承認状況","処理者","処理日時","承認コメント","提出日時"];
   const rows = requests.slice().sort((a,b) => (a.submittedAt||"").localeCompare(b.submittedAt||"")).map(r => [
     r.draftDate||"", r.name||"", r.applicantEmail||"", r.fromDate||"", r.toDate||"",
     r.useDays!=null?r.useDays:"", r.haveDays!=null?r.haveDays:"", r.afterDays!=null?r.afterDays:"",
     r.vacationType||"", r.daikyuDetail||"", (r.reason||"").replace(/\n/g," "),
     r.workOk?"はい":"", r.calOk?"はい":"", r.kakaoOk?"はい":"", r.custOk?"はい":"", r.mailOk?"はい":"",
     r.specialPrep||"", r.deputy||"", r.phonePerson||"",
+    (r.relations||[]).map(x => x.name + (x.email ? "（" + x.email + "）" : "")).join(" / "),
     r.status==="approved"?"承認済み":r.status==="rejected"?"差戻し":"承認待ち",
     r.approvedBy||"", r.approvedAt?new Date(r.approvedAt).toLocaleString("ja-JP",{timeZone:"Asia/Tokyo"}):"",
     r.approveComment||"",
