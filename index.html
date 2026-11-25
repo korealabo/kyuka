@@ -209,10 +209,16 @@ function renderList() {
     '<div class="brand">株式会社ケイラボ</div>' +
     '<div class="topbar"><div><h1>休暇届</h1>' +
     '<div class="sync"><span class="dot"></span>最終同期: ' + (lastSync || "―") + '</div></div>' +
-    '<div class="btnrow"><button id="btnReload">🔄 更新</button><button class="primary" id="btnNew">＋ 新規届出</button></div></div>' +
+    '<div class="btnrow"><button id="btnReload">🔄 更新</button><button id="btnCsv">📊 CSV出力</button><button class="primary" id="btnNew">＋ 新規届出</button></div></div>' +
     '<div class="search"><input type="text" id="searchBox" placeholder="🔍 名前・事由などで検索..." value="' + esc(keyword) + '"></div>' +
     cards;
   $("btnReload").onclick = refresh;
+  $("btnCsv").onclick = () => {
+    const pw = prompt("CSV出力は管理者のみ可能です。パスワードを入力してください");
+    if (pw === null) return;
+    if (pw !== ADMIN_PASSWORD) { alert("パスワードが違います"); return; }
+    exportCsv();
+  };
   $("btnNew").onclick = () => { view = "form"; render(); };
   $("searchBox").oninput = e => { keyword = e.target.value; renderList(); const b = $("searchBox"); b.focus(); b.setSelectionRange(b.value.length, b.value.length); };
   document.querySelectorAll(".post-card").forEach(el => {
@@ -458,6 +464,30 @@ function renderForm() {
       $("btnSubmit").disabled = false; $("btnSubmit").textContent = "休暇届を提出する";
     }
   };
+}
+
+/* ===== CSV出力 ===== */
+function exportCsv() {
+  const headers = ["届出日","休暇者","休暇者メール","開始日","終了日","使用日数","保有日数（申請時）","使用後残日数","休暇の種類","代休の対象","事由","既存業務問題なし","カレンダー記載","業務連絡ルーム共有","お客様へ事前共有","メール自動返信設定","特別業務への備え","業務代行者","電話対応者","承認状況","処理者","処理日時","承認コメント","提出日時"];
+  const rows = requests.slice().sort((a,b) => (a.submittedAt||"").localeCompare(b.submittedAt||"")).map(r => [
+    r.draftDate||"", r.name||"", r.applicantEmail||"", r.fromDate||"", r.toDate||"",
+    r.useDays!=null?r.useDays:"", r.haveDays!=null?r.haveDays:"", r.afterDays!=null?r.afterDays:"",
+    r.vacationType||"", r.daikyuDetail||"", (r.reason||"").replace(/\n/g," "),
+    r.workOk?"はい":"", r.calOk?"はい":"", r.kakaoOk?"はい":"", r.custOk?"はい":"", r.mailOk?"はい":"",
+    r.specialPrep||"", r.deputy||"", r.phonePerson||"",
+    r.status==="approved"?"承認済み":r.status==="rejected"?"差戻し":"承認待ち",
+    r.approvedBy||"", r.approvedAt?new Date(r.approvedAt).toLocaleString("ja-JP",{timeZone:"Asia/Tokyo"}):"",
+    r.approveComment||"",
+    r.submittedAt?new Date(r.submittedAt).toLocaleString("ja-JP",{timeZone:"Asia/Tokyo"}):""
+  ].map(v => '"' + String(v).replace(/"/g,'""') + '"').join(","));
+  const csv = "\uFEFF" + headers.join(",") + "\n" + rows.join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "休暇届_" + todayJP() + ".csv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 /* ===== 描画・更新 ===== */
